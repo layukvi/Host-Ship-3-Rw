@@ -267,12 +267,45 @@ def first_visible(page, selectors):
     return None
 
 
+def safe_goto(page, url, reason="", retries=3):
+    last_exc = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000,
+            )
+            return True
+
+        except Exception as exc:
+            last_exc = exc
+            err = str(exc)
+
+            if "ERR_ABORTED" in err and attempt < retries:
+                log(
+                    "⚠️ 页面跳转被中断，"
+                    f"重试 {attempt}/{retries}"
+                    + (f"（{reason}）" if reason else "")
+                )
+                page.wait_for_timeout(1500)
+                continue
+
+            raise
+
+    if last_exc:
+        raise last_exc
+
+    return False
+
+
 def login_if_needed(page):
-    page.goto(
-        SERVER_URL,
-        wait_until="domcontentloaded",
-        timeout=60000,
-    )
+    try:
+        safe_goto(page, SERVER_URL, "打开服务器详情页")
+    except Exception as exc:
+        log(f"❌ 打开服务器页面失败：{exc}")
+        return False
 
     time.sleep(2)
 
@@ -366,11 +399,22 @@ def login_if_needed(page):
         )
         return False
 
-    page.goto(
-        SERVER_URL,
-        wait_until="domcontentloaded",
-        timeout=60000,
-    )
+    try:
+        page.wait_for_url(
+            re.compile(r"/server/", re.I),
+            timeout=12000,
+        )
+    except Exception:
+        pass
+
+    if "/server/" in page.url:
+        return True
+
+    try:
+        safe_goto(page, SERVER_URL, "登录后回到服务器页")
+    except Exception as exc:
+        log(f"❌ 登录后跳转服务器页失败：{exc}")
+        return False
 
     page.wait_for_timeout(2000)
 
